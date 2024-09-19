@@ -27,6 +27,11 @@ class ONNX2TensorRT:
         parser = trt.OnnxParser(network, logger)
         parse_result = parser.parse_from_file(self._onnx_path)
 
+        num_outputs = network.num_outputs
+        for idx in range(num_outputs):
+            tensor = network.get_output(idx)
+            print(f"output:{tensor.name}")
+
         if not parse_result:
             logger.log(trt.Logger.ERROR, "onnx parse error")
             for err_idx in parser.num_errors:
