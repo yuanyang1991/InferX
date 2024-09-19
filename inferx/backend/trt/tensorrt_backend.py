@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -7,16 +6,27 @@ from cuda import cudart
 
 from .convert.dynamic_axis import DynamicAxisInfo
 from .convert.onnx_tensorrt import ONNX2TensorRT
-from .utils import HostDeviceMem, get_binding_mem, copy_mem_host_device, copy_mem_device_host, cuda_call
+from .utils import cuda_call, get_io, \
+    copy_data_to_gpu, free_device_memory, synchronize_stream
 from ...base import ABSBackend
 
 
-@dataclass
-class TensorInfo:
-    tensor_name: str
-    tensor_shape: tuple
-    tensor_dtype: trt.DataType
-    memo_info: HostDeviceMem
+class OutputAllocator(trt.IOutputAllocator):
+
+    def __init__(self):
+        trt.IOutputAllocator.__init__(self)
+        self.buffers = {}
+        self.shapes = {}
+
+    def reallocate_output(self, tensor_name, memory, size, alignment):
+        if tensor_name in self.buffers:
+            del self.buffers[tensor_name]
+        device_ptr = cuda_call(cudart.cudaMalloc(size))
+        self.buffers[tensor_name] = device_ptr
+        return int(device_ptr)
+
+    def notify_shape(self, tensor_name, shape):
+        self.shapes[tensor_name] = tuple(shape)
 
 
 class TensorRTBackend(ABSBackend):
@@ -36,59 +46,48 @@ class TensorRTBackend(ABSBackend):
             self._engine: trt.ICudaEngine = self._runtime.deserialize_cuda_engine(f.read())
         self._context: trt.IExecutionContext = self._engine.create_execution_context()
 
-    def _allocate_buffers(self, inputs: dict[str, np.ndarray]):
-        # TODO: 直接从numpy复制数据到device;直接从device复制数据到numpy中，避免中间转换
-        input_tensors, output_tensors = [], []
-        num_tensors = self._engine.num_io_tensors
-
-        for idx in range(num_tensors):
-            tensor_name = self._engine.get_tensor_name(idx)
-            dtype: trt.DataType = self._engine.get_tensor_dtype(tensor_name)
-            if self._engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.INPUT:
-                tensor_shape = inputs[tensor_name].shape  # 使用输入数据得到shape，避免动态轴造成的不便
-                input_tensors.append(
-                    TensorInfo(tensor_name=tensor_name,
-                               tensor_shape=tensor_shape,
-                               tensor_dtype=dtype,
-                               memo_info=get_binding_mem(dtype, tensor_shape)))
-            else:
-                tensor_shape = self._engine.get_tensor_shape(tensor_name)  # 使用输出的shape，注意：此处不支持动态维度的输出
-                output_tensors.append(
-                    TensorInfo(tensor_name=tensor_name,
-                               tensor_shape=tensor_shape,
-                               tensor_dtype=dtype,
-                               memo_info=get_binding_mem(dtype, tensor_shape)))
-
-        return input_tensors, output_tensors
-
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         stream = cuda_call(cudart.cudaStreamCreate())
-        input_tensors, output_tensors = self._allocate_buffers(inputs)
 
-        # 设置输入地址，复制输入数据
-        for input_tensor in input_tensors:
-            self._context.set_input_shape(input_tensor.tensor_name, input_tensor.tensor_shape)
-            self._context.set_tensor_address(input_tensor.tensor_name, input_tensor.memo_info.device)
-            copy_mem_host_device(input_tensor.memo_info, stream)
+        input_buffers = {}
+        for tensor_name in get_io(self._engine, trt.TensorIOMode.INPUT):
+            array = inputs[tensor_name]
+            if self._engine.is_shape_inference_io(tensor_name):
+                ptr = array.ctypes.data
+            else:
+                ptr = copy_data_to_gpu(array, stream)
+                if tensor_name in input_buffers:
+                    free_device_memory(input_buffers[tensor_name])
+                input_buffers[tensor_name] = ptr
+            if self._context.get_tensor_address(tensor_name) != ptr:
+                self._context.set_tensor_address(tensor_name, ptr)
+            shape = array.shape
+            if self._context.get_tensor_shape(tensor_name) != shape:
+                self._context.set_input_shape(tensor_name, shape)
 
-        # 设置输出地址
-        for output_tensor in output_tensors:
-            self._context.set_tensor_address(output_tensor.tensor_name, output_tensor.memo_info.device)
+        output_allocator = OutputAllocator()
+        for tensor_name in get_io(self._engine, trt.TensorIOMode.OUTPUT):
+            self._context.set_output_allocator(tensor_name, output_allocator)
 
         # 执行运算
         self._context.execute_async_v3(stream_handle=stream)
 
         # 从CUDA复制数据到主存
-        [copy_mem_device_host(output_tensor.memo_info, stream) for output_tensor in output_tensors]
-        cuda_call(cudart.cudaStreamSynchronize(stream))
-        outputs = {
-            output_tensor.tensor_name: output_tensor.memo_info.host.reshape(output_tensor.tensor_shape).copy()
-            for output_tensor in output_tensors}
-
-        # 释放内存
-        for tensors in input_tensors + output_tensors:
-            tensors.memo_info.free()
-
+        outputs = {}
+        for tensor_name in get_io(self._engine, trt.TensorIOMode.OUTPUT):
+            dtype = trt.nptype(self._engine.get_tensor_dtype(tensor_name))
+            shape = output_allocator.shapes[tensor_name]
+            array: np.ndarray = np.empty(shape, dtype)
+            array_ptr = array.ctypes.data
+            ptr = output_allocator.buffers[tensor_name]
+            cuda_call(cudart.cudaMemcpyAsync(array_ptr, ptr, array.nbytes,
+                                             cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream))
+            outputs[tensor_name] = array
+        synchronize_stream(stream)
+        for _, devPtr in input_buffers.items():
+            free_device_memory(devPtr)
+        for _, devPtr in output_allocator.buffers.items():
+            free_device_memory(devPtr)
         return outputs
 
     def release(self):
