@@ -39,8 +39,8 @@ class ONNX2TensorRT:
             raise RuntimeError("Failed to parse ONNX model")
 
         config: trt.IBuilderConfig = builder.create_builder_config()
-        self._dynamic_axes = {item.input_name: item for item in self._dynamic_axes}
         if self._dynamic_axes:
+            self._dynamic_axes = {item.input_name: item for item in self._dynamic_axes}
             logger.log(trt.Logger.INFO, "start to bind profile config")
             profile: trt.IOptimizationProfile = builder.create_optimization_profile()
             num_inputs = network.num_inputs

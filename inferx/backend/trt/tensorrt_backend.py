@@ -55,6 +55,11 @@ class TensorRTBackend(ABSBackend):
             if self._engine.is_shape_inference_io(tensor_name):
                 ptr = array.ctypes.data
             else:
+                host_dtype = array.dtype
+                tensor_dtype = self._engine.get_tensor_dtype(tensor_name)
+                if trt.nptype(tensor_dtype) != host_dtype:
+                    raise RuntimeError(
+                        f"input buffer {tensor_name} type {host_dtype} not match model tensor typpe {trt.nptype(tensor_dtype)}")
                 ptr = copy_data_to_gpu(array, stream)
                 if tensor_name in input_buffers:
                     free_device_memory(input_buffers[tensor_name])
