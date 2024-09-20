@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name="inferx",
-      version="1.0.0",
+      version="1.0.1",
       author="yuanyang",
       author_email="yuan823978@gmail.com",
       url="https://github.com/yuanyang1991/InferX",
