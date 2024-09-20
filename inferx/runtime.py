@@ -14,7 +14,7 @@ class Runtime:
         if config.backend == Backend.TensorRT:
             self._backend = TensorRTBackend(config.model_path, config.engine_path, config.dynamic_axes)
         else:
-            self._backend = ONNXBackend()
+            self._backend = ONNXBackend(config.devices, config.model_path)
 
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         return self._backend.run(inputs)

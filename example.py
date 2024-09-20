@@ -3,12 +3,14 @@ import numpy as np
 from inferx.backend.trt.convert.dynamic_axis import DynamicAxisInfo
 from inferx.config import Config, Backend
 from inferx.runtime import Runtime
+from inferx.config import Device
 
-dynamic_axes = [DynamicAxisInfo("point_coords", min_shape=(1, 2, 2), opt_shape=(1, 2, 2), max_shape=(1, 20, 2)),
-                DynamicAxisInfo("point_labels", min_shape=(1, 2), opt_shape=(1, 2), max_shape=(1, 20)),
-                DynamicAxisInfo("orig_im_size", min_shape=(1000, 1000), opt_shape=(2000, 2000), max_shape=(5000, 5000))
+dynamic_axes = [DynamicAxisInfo("point_coords", min_value=(1, 2, 2), opt_value=(1, 2, 2), max_value=(1, 20, 2)),
+                DynamicAxisInfo("point_labels", min_value=(1, 2), opt_value=(1, 2), max_value=(1, 20)),
+                DynamicAxisInfo("orig_im_size", min_value=(1000, 1000), opt_value=(2000, 2000), max_value=(5000, 5000))
                 ]
-config = Config("sam_decoder.onnx", "sam_decoder.trt", backend=Backend.TensorRT, dynamic_axes=dynamic_axes)
+config = Config("sam_decoder.onnx", "sam_decoder.trt", backend=Backend.Onnx, dynamic_axes=dynamic_axes,
+                devices=[Device.GPU,Device.CPU])
 runtime = Runtime(config)
 
 # 用 numpy 替代 torch 的张量
