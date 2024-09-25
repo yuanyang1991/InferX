@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Dict
 
 import numpy as np
 
@@ -6,7 +7,7 @@ import numpy as np
 class ABSBackend(ABC):
 
     @abstractmethod
-    def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    def run(self, inputs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """
         执行推理
         :param inputs: key:输入名称 value:输入数据

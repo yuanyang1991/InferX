@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import List, Optional, Dict
 
 import numpy as np
 import tensorrt as trt
@@ -34,11 +35,14 @@ class TensorRTBackend(ABSBackend):
     TensorRT推理后端
     """
 
-    def __init__(self, model_path, engine_path, dynamic_axes: list[DynamicAxisInfo] = None):
+    def __init__(self, model_path, engine_path, dynamic_axes: Optional[List[DynamicAxisInfo]] = None, enable_log=False):
         self._model_path = model_path
         self._engine_path = engine_path
+        self._enable_log = enable_log
+        if not self._engine_path:
+            raise RuntimeError("engine path must provide when using tensorrt")
         if not Path(self._engine_path).exists():
-            ONNX2TensorRT(self._model_path, dynamic_axes).convert(engine_path=self._engine_path)
+            ONNX2TensorRT(self._model_path, dynamic_axes, self._enable_log).convert(engine_path=self._engine_path)
 
         self._logger = trt.Logger(trt.Logger.INFO)
         self._runtime = trt.Runtime(self._logger)
@@ -46,7 +50,7 @@ class TensorRTBackend(ABSBackend):
             self._engine: trt.ICudaEngine = self._runtime.deserialize_cuda_engine(f.read())
         self._context: trt.IExecutionContext = self._engine.create_execution_context()
 
-    def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    def run(self, inputs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         stream = cuda_call(cudart.cudaStreamCreate())
 
         input_buffers = {}

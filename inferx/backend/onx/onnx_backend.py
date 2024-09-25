@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 import numpy as np
 import onnxruntime as onnxrt
@@ -9,9 +9,10 @@ from ...config import Device
 
 class ONNXBackend(ABSBackend):
 
-    def __init__(self, devices: List[Device], model_path: str):
+    def __init__(self, devices: List[Device], model_path: str, enable_log: bool = False):
         self._devices = devices
         self._model_path = model_path
+        self._enable_log = enable_log
         support_providers = onnxrt.get_available_providers()
         providers = []
         for device in devices:
@@ -24,10 +25,11 @@ class ONNXBackend(ABSBackend):
         if not providers:
             providers.append("CPUExecutionProvider")
         options = onnxrt.SessionOptions()
-        options.log_severity_level = 1
+        if self._enable_log:
+            options.log_severity_level = 0
         self._session = onnxrt.InferenceSession(model_path, providers=providers, sess_options=options)
 
-    def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    def run(self, inputs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         inference_outputs = self._session.run(None, inputs)
         output_nodes = self._session.get_outputs()
         results = {}

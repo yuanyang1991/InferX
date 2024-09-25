@@ -1,5 +1,8 @@
+from typing import Tuple
+
+
 class DynamicAxisInfo:
-    def __init__(self, name: str, min_value: tuple, opt_value: tuple, max_value: tuple):
+    def __init__(self, name: str, min_value: Tuple, opt_value: Tuple, max_value: Tuple):
         """
         封装动态轴信息
         :param name: 输入张量的名称
@@ -18,16 +21,16 @@ class DynamicAxisInfo:
         return self.__name
 
     @property
-    def min_shape(self) -> tuple:
+    def min_shape(self) -> Tuple:
         """获取动态输入的最小形状"""
         return self.__min
 
     @property
-    def opt_shape(self) -> tuple:
+    def opt_shape(self) -> Tuple:
         """获取动态输入的优化形状"""
         return self.__opt
 
     @property
-    def max_shape(self) -> tuple:
+    def max_shape(self) -> Tuple:
         """获取动态输入的最大形状"""
         return self.__max

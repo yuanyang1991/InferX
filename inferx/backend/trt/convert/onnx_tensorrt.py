@@ -1,15 +1,18 @@
 from pathlib import Path
+from typing import List, Optional
 
-import tensorrt as trt
+import tensorrt as trt  # type: ignore
 
 from . import dynamic_axis
 
 
 class ONNX2TensorRT:
 
-    def __init__(self, onnx_path, dynamic_axes: list[dynamic_axis.DynamicAxisInfo] = None):
+    def __init__(self, onnx_path, dynamic_axes: Optional[List[dynamic_axis.DynamicAxisInfo]] = None,
+                 enable_log: bool = False):
         self._onnx_path = onnx_path
         self._dynamic_axes = dynamic_axes
+        self._enable_log = enable_log
 
     def convert(self, engine_path):
 
@@ -27,21 +30,24 @@ class ONNX2TensorRT:
         parser = trt.OnnxParser(network, logger)
         parse_result = parser.parse_from_file(self._onnx_path)
 
-        num_outputs = network.num_outputs
-        for idx in range(num_outputs):
-            tensor = network.get_output(idx)
-            print(f"output:{tensor.name}")
+        if self._enable_log:
+            num_outputs = network.num_outputs
+            for idx in range(num_outputs):
+                tensor = network.get_output(idx)
+                print(f"output:{tensor.name}")
 
         if not parse_result:
-            logger.log(trt.Logger.ERROR, "onnx parse error")
-            for err_idx in parser.num_errors:
-                logger.log(trt.Logger.ERROR, parser.get_error(err_idx))
+            if self._enable_log:
+                logger.log(trt.Logger.ERROR, "onnx parse error")
+                for err_idx in parser.num_errors:
+                    logger.log(trt.Logger.ERROR, parser.get_error(err_idx))
             raise RuntimeError("Failed to parse ONNX model")
 
         config: trt.IBuilderConfig = builder.create_builder_config()
         if self._dynamic_axes:
             self._dynamic_axes = {item.input_name: item for item in self._dynamic_axes}
-            logger.log(trt.Logger.INFO, "start to bind profile config")
+            if self._enable_log:
+                logger.log(trt.Logger.INFO, "start to bind profile config")
             profile: trt.IOptimizationProfile = builder.create_optimization_profile()
             num_inputs = network.num_inputs
             for idx in range(num_inputs):
@@ -62,11 +68,13 @@ class ONNX2TensorRT:
                         raise RuntimeError(f"{tensor.name} is dynamic tensor, must provide profile shapes")
 
                 else:
-                    logger.log(trt.Logger.INFO, f"tensor: {tensor.name} is static tensor")
+                    if self._enable_log:
+                        logger.log(trt.Logger.INFO, f"tensor: {tensor.name} is static tensor")
             result_code = config.add_optimization_profile(profile)
             if result_code == -1:
                 raise RuntimeError("bind profile error, input is not valid, check that")
-            logger.log(trt.Logger.INFO, "complete to bind profile config")
+            if self._enable_log:
+                logger.log(trt.Logger.INFO, "complete to bind profile config")
 
         serialized_engine = builder.build_serialized_network(network, config)
         if serialized_engine is None:
@@ -76,4 +84,5 @@ class ONNX2TensorRT:
             parent_dir.mkdir(parents=True, exist_ok=True)
         with open(engine_path, 'wb') as f:
             f.write(serialized_engine)
-        logger.log(trt.Logger.INFO, "complete build trt engine")
+        if self._enable_log:
+            logger.log(trt.Logger.INFO, "complete build trt engine")

@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name="inferx",
-      version="1.0.4",
+      version="1.1.1",
       author="yuanyang",
       author_email="yuan823978@gmail.com",
       url="https://github.com/yuanyang1991/InferX",
@@ -10,5 +10,6 @@ setup(name="inferx",
       python_requires='>=3.6',
       install_requires=[
           'tensorrt==10.3.0',
+          'cuda-python==12.3.0'
       ]
       )
