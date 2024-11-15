@@ -3,3 +3,6 @@
 *.engine
 .idea/
 **/__pycache__/
+InferX.egg-info/
+build/
+dist/

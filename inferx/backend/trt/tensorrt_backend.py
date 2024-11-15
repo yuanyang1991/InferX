@@ -52,51 +52,55 @@ class TensorRTBackend(ABSBackend):
 
     def run(self, inputs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         stream = cuda_call(cudart.cudaStreamCreate())
-
         input_buffers = {}
-        for tensor_name in get_io(self._engine, trt.TensorIOMode.INPUT):
-            array = inputs[tensor_name]
-            if self._engine.is_shape_inference_io(tensor_name):
-                ptr = array.ctypes.data
-            else:
-                host_dtype = array.dtype
-                tensor_dtype = self._engine.get_tensor_dtype(tensor_name)
-                if trt.nptype(tensor_dtype) != host_dtype:
-                    raise RuntimeError(
-                        f"input buffer {tensor_name} type {host_dtype} not match model tensor typpe {trt.nptype(tensor_dtype)}")
-                ptr = copy_data_to_gpu(array, stream)
-                if tensor_name in input_buffers:
-                    free_device_memory(input_buffers[tensor_name])
-                input_buffers[tensor_name] = ptr
-            if self._context.get_tensor_address(tensor_name) != ptr:
-                self._context.set_tensor_address(tensor_name, ptr)
-            shape = array.shape
-            if self._context.get_tensor_shape(tensor_name) != shape:
-                self._context.set_input_shape(tensor_name, shape)
-
         output_allocator = OutputAllocator()
-        for tensor_name in get_io(self._engine, trt.TensorIOMode.OUTPUT):
-            self._context.set_output_allocator(tensor_name, output_allocator)
-
-        # 执行运算
-        self._context.execute_async_v3(stream_handle=stream)
-
-        # 从CUDA复制数据到主存
         outputs = {}
-        for tensor_name in get_io(self._engine, trt.TensorIOMode.OUTPUT):
-            dtype = trt.nptype(self._engine.get_tensor_dtype(tensor_name))
-            shape = output_allocator.shapes[tensor_name]
-            array: np.ndarray = np.empty(shape, dtype)
-            array_ptr = array.ctypes.data
-            ptr = output_allocator.buffers[tensor_name]
-            cuda_call(cudart.cudaMemcpyAsync(array_ptr, ptr, array.nbytes,
-                                             cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream))
-            outputs[tensor_name] = array
-        synchronize_stream(stream)
-        for _, devPtr in input_buffers.items():
-            free_device_memory(devPtr)
-        for _, devPtr in output_allocator.buffers.items():
-            free_device_memory(devPtr)
+
+        try:
+            for tensor_name in get_io(self._engine, trt.TensorIOMode.INPUT):
+                array = inputs[tensor_name]
+                if self._engine.is_shape_inference_io(tensor_name):
+                    ptr = array.ctypes.data
+                else:
+                    host_dtype = array.dtype
+                    tensor_dtype = self._engine.get_tensor_dtype(tensor_name)
+                    if trt.nptype(tensor_dtype) != host_dtype:
+                        raise RuntimeError(
+                            f"input buffer {tensor_name} type {host_dtype} not match model tensor typpe {trt.nptype(tensor_dtype)}")
+                    ptr = copy_data_to_gpu(array, stream)
+                    if tensor_name in input_buffers:
+                        free_device_memory(input_buffers[tensor_name])
+                    input_buffers[tensor_name] = ptr
+                if self._context.get_tensor_address(tensor_name) != ptr:
+                    self._context.set_tensor_address(tensor_name, ptr)
+                shape = array.shape
+                if self._context.get_tensor_shape(tensor_name) != shape:
+                    self._context.set_input_shape(tensor_name, shape)
+
+            for tensor_name in get_io(self._engine, trt.TensorIOMode.OUTPUT):
+                self._context.set_output_allocator(tensor_name, output_allocator)
+
+            # 执行运算
+            self._context.execute_async_v3(stream_handle=stream)
+
+            # 从CUDA复制数据到主存
+            for tensor_name in get_io(self._engine, trt.TensorIOMode.OUTPUT):
+                if tensor_name in output_allocator.shapes:
+                    dtype = trt.nptype(self._engine.get_tensor_dtype(tensor_name))
+                    shape = output_allocator.shapes[tensor_name]
+                    array: np.ndarray = np.empty(shape, dtype)
+                    array_ptr = array.ctypes.data
+                    ptr = output_allocator.buffers[tensor_name]
+                    cuda_call(cudart.cudaMemcpyAsync(array_ptr, ptr, array.nbytes,
+                                                     cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream))
+                    outputs[tensor_name] = array
+            synchronize_stream(stream)
+        finally:
+            for _, devPtr in input_buffers.items():
+                free_device_memory(devPtr)
+            for _, devPtr in output_allocator.buffers.items():
+                free_device_memory(devPtr)
+            cuda_call(cudart.cudaStreamDestroy(stream))
         return outputs
 
     def release(self):
